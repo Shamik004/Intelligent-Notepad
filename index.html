@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notepad</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .notepad {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 800px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .toolbar {
+            background: #f8f9fa;
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar button, .toolbar select {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: #e9ecef;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .toolbar button:hover, .toolbar select:hover {
+            background: #dee2e6;
+        }
+
+        .toolbar select {
+            background: #e9ecef;
+        }
+
+        #textarea {
+            width: 100%;
+            min-height: 400px;
+            border: none;
+            padding: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+            resize: none;
+            outline: none;
+            flex-grow: 1;
+        }
+
+        .status-bar {
+            background: #f8f9fa;
+            padding: 8px 16px;
+            border-top: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #495057;
+        }
+
+        .suggestion-box {
+            background: #f8f9fa;
+            padding: 12px;
+            border-top: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #495057;
+            display: none;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .suggestion-box button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: #e9ecef;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .suggestion-box button:hover {
+            background: #dee2e6;
+        }
+
+        @media (max-width: 600px) {
+            .notepad {
+                margin: 10px;
+            }
+
+            .toolbar {
+                padding: 8px;
+                gap: 8px;
+            }
+
+            .toolbar button, .toolbar select {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+
+            #textarea {
+                padding: 15px;
+                font-size: 14px;
+            }
+
+            .suggestion-box {
+                padding: 8px;
+                gap: 8px;
+            }
+
+            .suggestion-box button {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="notepad">
+        <div class="toolbar">
+            <button onclick="formatText('bold')">Bold</button>
+            <button onclick="formatText('italic')">Italic</button>
+            <button onclick="formatText('underline')">Underline</button>
+            <select onchange="changeFont(this.value)">
+                <option value="Segoe UI">Segoe UI</option>
+                <option value="Arial">Arial</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Courier New">Courier New</option>
+            </select>
+            <select onchange="changeFontSize(this.value)">
+                <option value="16">16px</option>
+                <option value="18">18px</option>
+                <option value="20">20px</option>
+                <option value="24">24px</option>
+            </select>
+            <button onclick="clearText()">Clear</button>
+            <button onclick="saveText()">Save</button>
+        </div>
+        <textarea id="textarea" placeholder="Start typing..."></textarea>
+        <div class="suggestion-box" id="suggestionBox"></div>
+        <div class="status-bar" id="status">Words: 0 | Characters: 0</div>
+    </div>
+
+    <script>
+        const textarea = document.getElementById('textarea');
+        const status = document.getElementById('status');
+        const suggestionBox = document.getElementById('suggestionBox');
+        let lastWord = '';
+        let lastWordStart = 0;
+        let debounceTimeout = null;
+
+        function formatText(command) {
+            document.execCommand(command, false, null);
+            textarea.focus();
+        }
+
+        function changeFont(font) {
+            textarea.style.fontFamily = font;
+        }
+
+        function changeFontSize(size) {
+            textarea.style.fontSize = size + 'px';
+        }
+
+        function clearText() {
+            textarea.value = '';
+            updateStatus();
+            textarea.focus();
+            hideSuggestions();
+        }
+
+        function saveText() {
+            const text = textarea.value;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'note.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function updateStatus() {
+            const text = textarea.value;
+            const words = text.trim().split(/\s+/).filter(word => word.length > 0).length;
+            const chars = text.length;
+            status.textContent = `Words: ${words} | Characters: ${chars}`;
+        }
+
+        function hideSuggestions() {
+            suggestionBox.style.display = 'none';
+            suggestionBox.innerHTML = '';
+        }
+
+        async function fetchAutocorrect(word) {
+            try {
+                const response = await fetch('http://localhost:11434/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'gemma2:2b',
+                        messages: [{
+                            role: 'user',
+                            content: `Act as autocorrect expert just correct user input if needed, dont add anything else or response any other text or sentence along with the response. Give response in one word dont. Input: ${word}. Give one word response only`
+                        }],
+                        stream: false,
+                        temperature: 0
+                    })
+                });
+                const data = await response.json();
+                return data.message.content.trim();
+            } catch (error) {
+                console.error('Autocorrect API error:', error);
+                return word;
+            }
+        }
+
+        async function fetchAutoSuggestion(sentence) {
+            try {
+                const response = await fetch('http://localhost:11434/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'gemma2:2b',
+                        messages: [{
+                            role: 'user',
+                            content: `Act as auto suggestion expert just suggest next word based on user input based on the input sentence, dont add anything else or response any other text or sentence along with the response. Give response in one word only. Input: ${sentence}`
+                        }],
+                        stream: false,
+                        temperature: 0
+                    })
+                });
+                const data = await response.json();
+                return data.message.content.trim();
+            } catch (error) {
+                console.error('Autosuggestion API error:', error);
+                return '';
+            }
+        }
+
+        function showSuggestions(correctedWord, suggestedWord) {
+            let buttons = '';
+            if (correctedWord && correctedWord !== lastWord) {
+                buttons += `<button onclick="replaceWord('${correctedWord}')">Correct: ${correctedWord}</button>`;
+            }
+            if (suggestedWord) {
+                buttons += `<button onclick="appendWord('${suggestedWord}')">Suggest: ${suggestedWord}</button>`;
+            }
+            if (buttons) {
+                suggestionBox.innerHTML = buttons;
+                suggestionBox.style.display = 'flex';
+            } else {
+                hideSuggestions();
+            }
+        }
+
+        function replaceWord(correctedWord) {
+            const text = textarea.value;
+            textarea.value = text.substring(0, lastWordStart) + correctedWord + text.substring(lastWordStart + lastWord.length);
+            hideSuggestions();
+            updateStatus();
+            textarea.focus();
+        }
+
+        function appendWord(suggestedWord) {
+            const text = textarea.value;
+            textarea.value = text + (text.endsWith(' ') ? '' : ' ') + suggestedWord + ' ';
+            hideSuggestions();
+            updateStatus();
+            textarea.focus();
+        }
+
+        async function updateSuggestions() {
+            const text = textarea.value.substring(0, textarea.selectionStart);
+            const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+            let correctedWord = null;
+            let suggestedWord = '';
+
+            if (words.length > 0) {
+                lastWord = words[words.length - 1];
+                lastWordStart = text.lastIndexOf(lastWord);
+                correctedWord = await fetchAutocorrect(lastWord);
+            }
+
+            suggestedWord = await fetchAutoSuggestion(text.trim());
+            showSuggestions(correctedWord, suggestedWord);
+        }
+
+        textarea.addEventListener('input', () => {
+            updateStatus();
+            if (debounceTimeout) {
+                clearTimeout(debounceTimeout);
+            }
+            debounceTimeout = setTimeout(updateSuggestions, 300);
+        });
+
+        textarea.addEventListener('focus', () => textarea.select());
+
+        updateStatus();
+    </script>
+</body>
+</html>
